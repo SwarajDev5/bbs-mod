@@ -83,6 +83,7 @@ import net.minecraft.item.ItemStack;
 import net.minecraft.util.Hand;
 import org.lwjgl.glfw.GLFW;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
+import net.fabricmc.fabric.api.command.v2.CommandRegistrationCallback;
 
 import java.io.File;
 import java.util.Collections;
