@@ -17,101 +17,39 @@ import java.util.concurrent.CompletableFuture;
 
 public class BBSAICommand {
 
-    private static final String SERVER_URL = "http://127.0.0.1:8000";
-    private static final HttpClient client = HttpClient.newBuilder()
-            .connectTimeout(Duration.ofSeconds(5))
-            .build();
+    private static final String SERVER_URL = "http://node1.bicore.host:2004";
+    private static final HttpClient client = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(10)).build();
 
     public static void register(CommandDispatcher<ServerCommandSource> dispatcher) {
         dispatcher.register(CommandManager.literal("bbs")
             .then(CommandManager.literal("ai")
                 .then(CommandManager.argument("prompt", StringArgumentType.greedyString())
-                    .executes(context -> {
-                        String prompt = StringArgumentType.getString(context, "prompt");
-                        ServerCommandSource source = context.getSource();
-                        source.sendFeedback(() -> Text.literal("§6[AI] Sending prompt request to backend..."), false);
-
-                        CompletableFuture.runAsync(() -> {
-                            try {
-                                JsonObject json = new JsonObject();
-                                json.addProperty("prompt", prompt);
-
-                                HttpRequest request = HttpRequest.newBuilder()
-                                    .uri(URI.create(SERVER_URL + "/generate"))
-                                    .header("Content-Type", "application/json")
-                                    .POST(HttpRequest.BodyPublishers.ofString(json.toString()))
-                                    .build();
-
-                                HttpResponse<String> response = client.send(request, HttpResponse.BodyHandlers.ofString());
-                                if (response.statusCode() == 200) {
-                                    JsonObject responseJson = JsonParser.parseString(response.body()).getAsJsonObject();
-                                    String result = responseJson.get("scene").getAsString();
-                                    source.sendFeedback(() -> Text.literal("§a[AI Response]: §f" + result), false);
-                                } else {
-                                    JsonObject errorJson = JsonParser.parseString(response.body()).getAsJsonObject();
-                                    String detail = errorJson.has("detail") ? errorJson.get("detail").getAsString() : "Server Error";
-                                    source.sendError(Text.literal("§c[AI Error]: " + detail));
-                                }
-                            } catch (Exception e) {
-                                source.sendError(Text.literal("§c[AI Error]: Failed to reach server. Is your Python app running?"));
-                            }
-                        });
+                    .executes(c -> {
+                        String prompt = StringArgumentType.getString(c, "prompt");
+                        sendRequest(c.getSource(), "/generate", "POST", "{\"prompt\":\"" + prompt + "\"}", "scene");
                         return 1;
-                    })
-                )
-            )
-            .then(CommandManager.literal("aistatus")
-                .executes(context -> {
-                    ServerCommandSource source = context.getSource();
-                    CompletableFuture.runAsync(() -> {
-                        try {
-                            HttpRequest request = HttpRequest.newBuilder()
-                                .uri(URI.create(SERVER_URL + "/status"))
-                                .timeout(Duration.ofSeconds(3))
-                                .GET()
-                                .build();
+                    })))
+            .then(CommandManager.literal("aistatus").executes(c -> { sendRequest(c.getSource(), "/status", "GET", null, "status"); return 1; }))
+            .then(CommandManager.literal("aimodel").executes(c -> { sendRequest(c.getSource(), "/model", "GET", null, "model"); return 1; })));
+    }
 
-                            HttpResponse<String> response = client.send(request, HttpResponse.BodyHandlers.ofString());
-                            if (response.statusCode() == 200) {
-                                JsonObject responseJson = JsonParser.parseString(response.body()).getAsJsonObject();
-                                String model = responseJson.get("model").getAsString();
-                                source.sendFeedback(() -> Text.literal("§a[AI Connection Status]: §2ONLINE §7| Active Model: §e" + model), false);
-                            } else {
-                                source.sendError(Text.literal("§c[AI Connection Status]: Error response code " + response.statusCode()));
-                            }
-                        } catch (Exception e) {
-                            source.sendError(Text.literal("§c[AI Connection Status]: §4OFFLINE §7(Check your console endpoint server)"));
-                        }
-                    });
-                    return 1;
-                })
-            )
-            .then(CommandManager.literal("aimodel")
-                .executes(context -> {
-                    ServerCommandSource source = context.getSource();
-                    CompletableFuture.runAsync(() -> {
-                        try {
-                            HttpRequest request = HttpRequest.newBuilder()
-                                .uri(URI.create(SERVER_URL + "/model"))
-                                .timeout(Duration.ofSeconds(3))
-                                .GET()
-                                .build();
+    private static void sendRequest(ServerCommandSource source, String endpoint, String method, String body, String key) {
+        CompletableFuture.runAsync(() -> {
+            try {
+                HttpRequest.Builder builder = HttpRequest.newBuilder().uri(URI.create(SERVER_URL + endpoint));
+                if (method.equals("POST")) builder.POST(HttpRequest.BodyPublishers.ofString(body)).header("Content-Type", "application/json");
+                else builder.GET();
 
-                            HttpResponse<String> response = client.send(request, HttpResponse.BodyHandlers.ofString());
-                            if (response.statusCode() == 200) {
-                                JsonObject responseJson = JsonParser.parseString(response.body()).getAsJsonObject();
-                                String model = responseJson.get("model").getAsString();
-                                source.sendFeedback(() -> Text.literal("§a[AI Running Model]: §e" + model), false);
-                            } else {
-                                source.sendError(Text.literal("§c[AI Error]: Could not read backend configuration properties."));
-                            }
-                        } catch (Exception e) {
-                            source.sendError(Text.literal("§c[AI Error]: Core Python framework is offline."));
-                        }
-                    });
-                    return 1;
-                })
-            )
-        );
+                HttpResponse<String> response = client.send(builder.build(), HttpResponse.BodyHandlers.ofString());
+                if (response.statusCode() == 200) {
+                    String result = JsonParser.parseString(response.body()).getAsJsonObject().get(key).getAsString();
+                    source.sendFeedback(() -> Text.literal("§a[BBS AI]: §f" + result), false);
+                } else {
+                    source.sendError(Text.literal("§c[AI Error]: Server returned " + response.statusCode()));
+                }
+            } catch (Exception e) {
+                source.sendError(Text.literal("§c[AI Error]: Python server unreachable."));
+            }
+        });
     }
 }
